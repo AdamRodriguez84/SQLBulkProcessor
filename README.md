@@ -177,3 +177,5 @@ dotnet pack src/SQLBulkProcessor/SQLBulkProcessor.csproj -c Release
 ```
 
 The package includes this README, an MIT license, and a symbol package (`.snupkg`).
+
+Merges into `main` pack and publish through GitHub Actions (`.github/workflows/build.yml`). nuget.org uses [Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing) (OIDC) rather than a long-lived API key. The nuget.org policy must list this repository and the workflow file `build.yml`. Set the Actions variable `NUGET_USER` to your nuget.org profile name if it is not the same as the GitHub owner.
