@@ -107,12 +107,38 @@ await tx.CommitAsync();
 
 ## Benchmark
 
-The test project includes a SQL Server catalog benchmark with a deterministic 25,000-row seed (mixed categories, brands, warehouses, prices, nullable columns, and variable-length text). Each operation is timed twice on the same data:
+The test project includes a SQL Server catalog benchmark with a deterministic **25,000-row** seed. Each operation is timed twice on the same data:
 
 - **EF ChangeTracker** — standard `AddRange` / `UpdateRange` / `RemoveRange` / `SaveChanges`, plus load-and-mutate for upsert and merge
 - **SQLBulkProcessor** — `BulkInsert` / `BulkUpdate` / `BulkUpsert` / `BulkDelete` / `BulkMerge`
 
-The output table reports both means and the bulk speedup.
+Setup (truncate / reload) is excluded from the timings so the comparison is the operation itself.
+
+### Dataset
+
+| | |
+| --- | --- |
+| Rows | 25,000 |
+| Shape | 12 categories, 20 brands, 8 warehouses |
+| Mix | 16,107 active, 2,534 discontinued, 2,020 out of stock |
+| Text | ~216 character descriptions, nullable tags and discontinued dates |
+| Price range | $2.04 – $2,511.63 |
+| Upsert | 12,500 existing rows updated + 12,500 new rows inserted |
+| Merge | 20,000 updated, 5,000 inserted, 5,000 deleted (table sync) |
+
+### Results vs ChangeTracker
+
+Measured on SQL Server (local instance), .NET 8, Release. ChangeTracker is 1 iteration; bulk is the mean of 3 iterations after a 2,000-row warmup.
+
+| Operation | ChangeTracker | SQLBulkProcessor | Speedup |
+| --- | ---: | ---: | ---: |
+| Insert | 6.120 s (4,085 rows/s) | 305.4 ms (81,872 rows/s) | **20.0×** |
+| Update | 6.950 s (3,597 rows/s) | 474.4 ms (52,693 rows/s) | **14.6×** |
+| Upsert (50/50) | 15.264 s (1,638 rows/s) | 586.8 ms (42,605 rows/s) | **26.0×** |
+| Delete | 782.0 ms (31,971 rows/s) | 319.5 ms (78,255 rows/s) | **2.4×** |
+| Merge (sync) | 20.993 s (1,191 rows/s) | 611.1 ms (40,907 rows/s) | **34.4×** |
+
+On this dataset, bulk insert, update, upsert, and merge finished in well under a second while ChangeTracker took 6–21 seconds. Delete is closer (ChangeTracker already issues relatively cheap `DELETE` statements by key) but bulk is still more than twice as fast.
 
 ```bash
 dotnet test tests/SQLBulkProcessor.Tests -c Release --filter Category=Benchmark
