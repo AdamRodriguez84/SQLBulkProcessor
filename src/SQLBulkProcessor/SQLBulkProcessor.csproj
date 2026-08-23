@@ -16,6 +16,8 @@
     <Description>High-performance bulk Insert, Update, Upsert, Delete, and Merge operations for Entity Framework Core on SQL Server, using SqlBulkCopy and MERGE.</Description>
     <PackageTags>entityframeworkcore;efcore;sqlserver;bulk;sqlbulkcopy;insert;update;upsert;delete;merge</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/AdamRodriguez84/SQLBulkProcessor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <IncludeSymbols>true</IncludeSymbols>

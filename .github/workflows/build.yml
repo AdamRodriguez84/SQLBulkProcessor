@@ -1,0 +1,87 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: "8.0.x"
+  CONFIGURATION: Release
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore SQLBulkProcessor.sln
+
+      - name: Build
+        run: dotnet build SQLBulkProcessor.sln --configuration ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Test
+        run: >
+          dotnet test tests/SQLBulkProcessor.Tests/SQLBulkProcessor.Tests.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --no-build
+          --filter "Category!=Benchmark"
+
+  publish:
+    name: Pack and publish NuGet
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Pack
+        run: >
+          dotnet pack src/SQLBulkProcessor/SQLBulkProcessor.csproj
+          --configuration ${{ env.CONFIGURATION }}
+          --output artifacts
+          -p:PackageVersion=1.0.${{ github.run_number }}
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Publish to GitHub Packages
+        run: >
+          dotnet nuget push artifacts/*.nupkg
+          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          --skip-duplicate
+
+      - name: Publish to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "NUGET_API_KEY is not set; skipping nuget.org publish."
+            exit 0
+          fi
+          dotnet nuget push artifacts/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*
