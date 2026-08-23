@@ -164,6 +164,12 @@ dotnet test tests/SQLBulkProcessor.Tests -c Release --filter Size=200k
 
 The tests are skipped when SQL Server is not reachable. Override the connection with `SQLBULKPROCESSOR_CONNECTION`. Exclude them from a normal run with `--filter Category!=Benchmark`.
 
+SQL Server integration tests (insert / update / upsert / delete / merge against a real database) run with the default test suite when SQL Server is available, or explicitly:
+
+```bash
+dotnet test tests/SQLBulkProcessor.Tests -c Release --filter Category=Integration
+```
+
 ## Pack
 
 ```bash

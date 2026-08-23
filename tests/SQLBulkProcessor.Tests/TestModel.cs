@@ -112,9 +112,13 @@ public class TestDbContext : DbContext
     }
 
     public static TestDbContext Create()
+        => Create("Server=.;Database=SQLBulkProcessorTests;Trusted_Connection=True;TrustServerCertificate=True;");
+
+    public static TestDbContext Create(string connectionString)
     {
         var options = new DbContextOptionsBuilder<TestDbContext>()
-            .UseSqlServer("Server=.;Database=SQLBulkProcessorTests;Trusted_Connection=True;TrustServerCertificate=True;")
+            .UseSqlServer(connectionString, sql => sql.CommandTimeout(60))
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
             .Options;
         return new TestDbContext(options);
     }

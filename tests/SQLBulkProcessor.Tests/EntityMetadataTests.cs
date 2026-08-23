@@ -86,6 +86,20 @@ public class EntityMetadataTests
     }
 
     [Fact]
+    public void Animal_IncludesDerivedTypeColumns()
+    {
+        using var db = TestDbContext.Create();
+        var metadata = EntityMetadataFactory.Get(db, typeof(Animal));
+        var breed = metadata.Columns.Single(c => c.PropertyName == "Breed");
+        var indoor = metadata.Columns.Single(c => c.PropertyName == "Indoor");
+
+        Assert.Equal("Lab", breed.GetValue(new Dog { Breed = "Lab" }));
+        Assert.Null(breed.GetValue(new Cat { Name = "Misty" }));
+        Assert.Equal(true, indoor.GetValue(new Cat { Indoor = true }));
+        Assert.Null(indoor.GetValue(new Dog { Name = "Rex" }));
+    }
+
+    [Fact]
     public void ExcludeColumns_RemovesMatchedProperties()
     {
         using var db = TestDbContext.Create();

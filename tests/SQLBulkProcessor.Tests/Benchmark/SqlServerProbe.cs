@@ -7,11 +7,23 @@ internal static class SqlServerProbe
     public const string ConnectionEnvironmentVariable = "SQLBULKPROCESSOR_CONNECTION";
 
     public static string? ResolveConnectionString()
+        => ResolveConnectionString("SQLBulkProcessorBench");
+
+    public static string? ResolveConnectionString(string databaseName)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
+
         var configured = Environment.GetEnvironmentVariable(ConnectionEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            return CanOpen(ToMaster(configured)) ? EnsureDatabaseName(configured) : null;
+            if (!CanOpen(ToMaster(configured)))
+                return null;
+
+            var builder = new SqlConnectionStringBuilder(configured)
+            {
+                InitialCatalog = databaseName
+            };
+            return builder.ConnectionString;
         }
 
         foreach (var server in new[] { ".", "(localdb)\\mssqllocaldb" })
@@ -19,7 +31,7 @@ internal static class SqlServerProbe
             var master = $"Server={server};Database=master;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=4";
             if (CanOpen(master))
             {
-                return $"Server={server};Database=SQLBulkProcessorBench;Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=8";
+                return $"Server={server};Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;Connect Timeout=8";
             }
         }
 
@@ -46,14 +58,6 @@ internal static class SqlServerProbe
         {
             InitialCatalog = "master"
         };
-        return builder.ConnectionString;
-    }
-
-    private static string EnsureDatabaseName(string connectionString)
-    {
-        var builder = new SqlConnectionStringBuilder(connectionString);
-        if (string.IsNullOrWhiteSpace(builder.InitialCatalog) || builder.InitialCatalog.Equals("master", StringComparison.OrdinalIgnoreCase))
-            builder.InitialCatalog = "SQLBulkProcessorBench";
         return builder.ConnectionString;
     }
 }

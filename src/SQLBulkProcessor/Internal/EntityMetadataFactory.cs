@@ -41,7 +41,7 @@ internal static class EntityMetadataFactory
 
         var columns = new List<ColumnMapping>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var candidate in WalkProperties(entityType, path: [], propertyPath: entityType.ClrType.Name))
+        foreach (var candidate in WalkMappedColumns(entityType))
         {
             var columnName = candidate.Property.GetColumnName(storeObject);
             if (string.IsNullOrEmpty(columnName) || !seen.Add(columnName))
@@ -127,6 +127,13 @@ internal static class EntityMetadataFactory
         }
 
         var propertyGetter = PropertyAccessor.CreateGetter(property);
+        var declaringClr = property.DeclaringType.ClrType;
+        if (!declaringClr.IsAssignableFrom(rootEntityType.ClrType))
+        {
+            var inner = propertyGetter;
+            propertyGetter = entity => declaringClr.IsInstanceOfType(entity) ? inner(entity) : null;
+        }
+
         if (candidate.Path.Count == 0)
             return propertyGetter;
 
@@ -143,6 +150,15 @@ internal static class EntityMetadataFactory
 
             return propertyGetter(current);
         };
+    }
+
+    private static IEnumerable<PropertyWalk> WalkMappedColumns(IEntityType entityType)
+    {
+        foreach (var type in entityType.GetDerivedTypesInclusive())
+        {
+            foreach (var walk in WalkProperties(type, path: [], propertyPath: type.ClrType.Name))
+                yield return walk;
+        }
     }
 
     private static IEnumerable<PropertyWalk> WalkProperties(
