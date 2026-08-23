@@ -107,28 +107,23 @@ await tx.CommitAsync();
 
 ## Benchmark
 
-The test project includes a SQL Server catalog benchmark with a deterministic **25,000-row** seed. Each operation is timed twice on the same data:
+The test project includes a SQL Server catalog benchmark with a deterministic seed. Each operation is timed twice on the **same in-memory dataset**:
 
 - **EF ChangeTracker** — standard `AddRange` / `UpdateRange` / `RemoveRange` / `SaveChanges`, plus load-and-mutate for upsert and merge
 - **SQLBulkProcessor** — `BulkInsert` / `BulkUpdate` / `BulkUpsert` / `BulkDelete` / `BulkMerge`
 
-Setup (truncate / reload) is excluded from the timings so the comparison is the operation itself.
+Setup (truncate / reload) is excluded from the timings so the comparison is the operation itself. Measured on SQL Server (local instance), .NET 8, Release. ChangeTracker is 1 iteration; bulk is the mean of 3 iterations after a 2,000-row warmup.
 
-### Dataset
+### 25,000 rows
 
 | | |
 | --- | --- |
-| Rows | 25,000 |
 | Shape | 12 categories, 20 brands, 8 warehouses |
 | Mix | 16,107 active, 2,534 discontinued, 2,020 out of stock |
 | Text | ~216 character descriptions, nullable tags and discontinued dates |
 | Price range | $2.04 – $2,511.63 |
 | Upsert | 12,500 existing rows updated + 12,500 new rows inserted |
 | Merge | 20,000 updated, 5,000 inserted, 5,000 deleted (table sync) |
-
-### Results vs ChangeTracker
-
-Measured on SQL Server (local instance), .NET 8, Release. ChangeTracker is 1 iteration; bulk is the mean of 3 iterations after a 2,000-row warmup.
 
 | Operation | ChangeTracker | SQLBulkProcessor | Speedup |
 | --- | ---: | ---: | ---: |
@@ -140,11 +135,34 @@ Measured on SQL Server (local instance), .NET 8, Release. ChangeTracker is 1 ite
 
 On this dataset, bulk insert, update, upsert, and merge finished in well under a second while ChangeTracker took 6–21 seconds. Delete is closer (ChangeTracker already issues relatively cheap `DELETE` statements by key) but bulk is still more than twice as fast.
 
+### 200,000 rows
+
+Same generator, seed, and column mix, scaled to 200,000 rows.
+
+| | |
+| --- | --- |
+| Mix | 128,897 active, 20,047 discontinued, 16,167 out of stock |
+| Text | ~216 character descriptions, nullable tags and discontinued dates |
+| Price range | $2.00 – $2,512.57 |
+| Upsert | 100,000 existing rows updated + 100,000 new rows inserted |
+| Merge | 160,000 updated, 40,000 inserted, 40,000 deleted (table sync) |
+
+| Operation | ChangeTracker | SQLBulkProcessor | Speedup |
+| --- | ---: | ---: | ---: |
+| Insert | 50.181 s (3,986 rows/s) | 2.227 s (89,799 rows/s) | **22.5×** |
+| Update | 55.386 s (3,611 rows/s) | 3.290 s (60,798 rows/s) | **16.8×** |
+| Upsert (50/50) | 119.235 s (1,677 rows/s) | 3.952 s (50,607 rows/s) | **30.2×** |
+| Delete | 7.737 s (25,848 rows/s) | 5.148 s (38,846 rows/s) | **1.5×** |
+| Merge (sync) | 162.626 s (1,230 rows/s) | 5.921 s (33,776 rows/s) | **27.5×** |
+
+Speedups hold at 8× the row count. Insert, update, upsert, and merge stay in the 17–30× range; ChangeTracker merge takes about 2.7 minutes while bulk finishes in about 6 seconds.
+
 ```bash
 dotnet test tests/SQLBulkProcessor.Tests -c Release --filter Category=Benchmark
+dotnet test tests/SQLBulkProcessor.Tests -c Release --filter Size=200k
 ```
 
-The test is skipped when SQL Server is not reachable. Override the connection with `SQLBULKPROCESSOR_CONNECTION`. Exclude it from a normal run with `--filter Category!=Benchmark`.
+The tests are skipped when SQL Server is not reachable. Override the connection with `SQLBULKPROCESSOR_CONNECTION`. Exclude them from a normal run with `--filter Category!=Benchmark`.
 
 ## Pack
 

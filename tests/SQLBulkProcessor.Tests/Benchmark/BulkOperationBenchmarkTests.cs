@@ -22,69 +22,78 @@ public class BulkOperationBenchmarkTests
 
     [SkippableFact(Timeout = 600_000)]
     [Trait("Category", "Benchmark")]
-    public async Task Bulk_operations_on_seeded_catalog()
+    public Task Bulk_operations_on_seeded_catalog()
+        => RunCatalogBenchmarkAsync(CatalogSeed.DefaultRowCount, commandTimeoutSeconds: 180);
+
+    [SkippableFact(Timeout = 2_700_000)]
+    [Trait("Category", "Benchmark")]
+    [Trait("Size", "200k")]
+    public Task Bulk_operations_on_seeded_catalog_200k()
+        => RunCatalogBenchmarkAsync(CatalogSeed.LargeRowCount, commandTimeoutSeconds: 600);
+
+    private async Task RunCatalogBenchmarkAsync(int rowCount, int commandTimeoutSeconds)
     {
         var connectionString = SqlServerProbe.ResolveConnectionString();
         Skip.If(
             connectionString is null,
             $"SQL Server is not available. Set {SqlServerProbe.ConnectionEnvironmentVariable} or install SQL Server / LocalDB.");
 
-        var catalog = CatalogSeed.Create(CatalogSeed.DefaultRowCount);
+        var catalog = CatalogSeed.Create(rowCount);
         WriteDataset(catalog);
 
         await using var db = BenchmarkDbContext.Create(connectionString);
-        db.Database.SetCommandTimeout(180);
+        db.Database.SetCommandTimeout(commandTimeoutSeconds);
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
 
-        await WarmupAsync(db);
+        await WarmupAsync(db, commandTimeoutSeconds);
 
         var comparisons = new List<OperationComparison>
         {
             await CompareAsync(db, "Insert", catalog.Count,
                 setup: () => TruncateAsync(db),
                 runTracker: () => ChangeTrackerCatalogOps.InsertAsync(db, CatalogSeed.Clone(catalog.Items)),
-                runBulk: () => db.BulkInsertAsync(CatalogSeed.Clone(catalog.Items), Configure)),
+                runBulk: () => db.BulkInsertAsync(CatalogSeed.Clone(catalog.Items), o => Configure(o, commandTimeoutSeconds))),
 
             await CompareAsync(db, "Update", catalog.Count,
                 setup: async () =>
                 {
-                    var rows = await ReloadWithIdsAsync(db, catalog.Items);
+                    var rows = await ReloadWithIdsAsync(db, catalog.Items, commandTimeoutSeconds);
                     CatalogSeed.MutateForUpdate(rows);
                     return rows;
                 },
                 runTracker: rows => ChangeTrackerCatalogOps.UpdateAsync(db, rows),
-                runBulk: rows => db.BulkUpdateAsync(rows, Configure)),
+                runBulk: rows => db.BulkUpdateAsync(rows, o => Configure(o, commandTimeoutSeconds))),
 
             await CompareAsync(db, "Upsert (50/50)", catalog.Count,
                 setup: async () =>
                 {
                     var existing = catalog.Items.Take(catalog.Count / 2).ToList();
-                    await ReloadWithIdsAsync(db, existing);
+                    await ReloadWithIdsAsync(db, existing, commandTimeoutSeconds);
                     return BuildUpsertSource(catalog);
                 },
                 runTracker: incoming => ChangeTrackerCatalogOps.UpsertAsync(db, incoming),
                 runBulk: incoming => db.BulkUpsertAsync(incoming, options =>
                 {
-                    Configure(options);
+                    Configure(options, commandTimeoutSeconds);
                     options.KeyColumns = ["Sku"];
                 })),
 
             await CompareAsync(db, "Delete", catalog.Count,
-                setup: () => ReloadWithIdsAsync(db, catalog.Items),
+                setup: () => ReloadWithIdsAsync(db, catalog.Items, commandTimeoutSeconds),
                 runTracker: rows => ChangeTrackerCatalogOps.DeleteAsync(db, rows),
-                runBulk: rows => db.BulkDeleteAsync(rows, Configure)),
+                runBulk: rows => db.BulkDeleteAsync(rows, o => Configure(o, commandTimeoutSeconds))),
 
             await CompareAsync(db, "Merge (sync)", catalog.Count,
                 setup: async () =>
                 {
-                    await ReloadWithIdsAsync(db, catalog.Items);
+                    await ReloadWithIdsAsync(db, catalog.Items, commandTimeoutSeconds);
                     return BuildMergeSource(catalog);
                 },
                 runTracker: source => ChangeTrackerCatalogOps.MergeAsync(db, source),
                 runBulk: source => db.BulkMergeAsync(source, options =>
                 {
-                    Configure(options);
+                    Configure(options, commandTimeoutSeconds);
                     options.KeyColumns = ["Sku"];
                     options.DeleteWhenNotMatchedBySource = true;
                 }))
@@ -104,47 +113,50 @@ public class BulkOperationBenchmarkTests
         });
     }
 
-    private static void Configure(BulkOptions options)
+    private static void Configure(BulkOptions options, int timeoutSeconds)
     {
-        options.BatchSize = 4_000;
-        options.TimeoutSeconds = 180;
+        options.BatchSize = timeoutSeconds >= 600 ? 8_000 : 4_000;
+        options.TimeoutSeconds = timeoutSeconds;
         options.UseTableLock = true;
     }
 
-    private static async Task WarmupAsync(BenchmarkDbContext db)
+    private static async Task WarmupAsync(BenchmarkDbContext db, int timeoutSeconds)
     {
         var warmup = CatalogSeed.Create(WarmupRows, seed: 7);
 
         await TruncateAsync(db);
         await ChangeTrackerCatalogOps.InsertAsync(db, CatalogSeed.Clone(warmup.Items));
 
-        var inserted = await ReloadWithIdsAsync(db, warmup.Items);
+        var inserted = await ReloadWithIdsAsync(db, warmup.Items, timeoutSeconds);
         CatalogSeed.MutateForUpdate(inserted);
         await ChangeTrackerCatalogOps.UpdateAsync(db, CatalogSeed.Clone(inserted, includeIds: true));
-        await db.BulkUpdateAsync(inserted, Configure);
+        await db.BulkUpdateAsync(inserted, o => Configure(o, timeoutSeconds));
 
         await TruncateAsync(db);
-        await ReloadWithIdsAsync(db, warmup.Items.Take(WarmupRows / 2).ToList());
+        await ReloadWithIdsAsync(db, warmup.Items.Take(WarmupRows / 2).ToList(), timeoutSeconds);
         var upsertSource = CatalogSeed.Clone(warmup.Items);
         CatalogSeed.MutateForUpdate(upsertSource.Take(WarmupRows / 2).ToList());
         await ChangeTrackerCatalogOps.UpsertAsync(db, upsertSource);
 
-        inserted = await ReloadWithIdsAsync(db, warmup.Items);
+        inserted = await ReloadWithIdsAsync(db, warmup.Items, timeoutSeconds);
         await ChangeTrackerCatalogOps.DeleteAsync(db, CatalogSeed.Clone(inserted, includeIds: true));
 
-        inserted = await ReloadWithIdsAsync(db, warmup.Items);
-        await db.BulkDeleteAsync(inserted, Configure);
+        inserted = await ReloadWithIdsAsync(db, warmup.Items, timeoutSeconds);
+        await db.BulkDeleteAsync(inserted, o => Configure(o, timeoutSeconds));
         await TruncateAsync(db);
     }
 
-    private static async Task<List<CatalogItem>> ReloadWithIdsAsync(BenchmarkDbContext db, IReadOnlyList<CatalogItem> template)
+    private static async Task<List<CatalogItem>> ReloadWithIdsAsync(
+        BenchmarkDbContext db,
+        IReadOnlyList<CatalogItem> template,
+        int timeoutSeconds)
     {
         await TruncateAsync(db);
         var rows = CatalogSeed.Clone(template);
         CatalogSeed.AssignSequentialIds(rows);
         await db.BulkInsertAsync(rows, options =>
         {
-            Configure(options);
+            Configure(options, timeoutSeconds);
             options.KeepIdentity = true;
         });
         await db.Database.CloseConnectionAsync();

@@ -43,6 +43,7 @@ public sealed class SeededCatalog
 public static class CatalogSeed
 {
     public const int DefaultRowCount = 25_000;
+    public const int LargeRowCount = 200_000;
     public const int DefaultSeed = 42;
 
     private static readonly string[] Categories =
